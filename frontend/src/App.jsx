@@ -1,17 +1,19 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useContext } from "react";
+import QuickActionBar from "./components/layout/QuickActionBar";
 
 import AuthContext from "./lib/AuthContext";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 import Sidebar from "./components/layout/Sidebar";
+import Topbar from "./components/layout/Topbar";
 
 import LoginPage from "./pages/LoginPage";
 import RoleDashboard from "./pages/RoleDashboard";
 
-import DriverDashboard from "./pages/Public/DriverDashboard";
-import UnitDashboard from "./pages/Public/UnitDashboard";
-import FuelReceiptPage from "./pages/Public/FuelReceiptPage";
+import DriverDashboard from "./pages/public/DriverDashboard";
+import UnitDashboard from "./pages/public/UnitDashboard";
+import FuelReceiptPage from "./pages/public/FuelReceiptPage";
 
 import UserManagementPage from "./pages/admin/UserManagementPage";
 import DriverManagementPage from "./pages/admin/DriverManagementPage";
@@ -55,13 +57,15 @@ function App() {
   location.pathname.startsWith("/fuel/");
 
   return (
-    <div data-theme="light" className="min-h-screen bg-white flex">
+    <div data-theme="corporate" className="h-screen overflow-hidden flex bg-slate-50 text-slate-900">
 
       {isAuthenticated && !isPublicDashboard && <Sidebar />}
 
-      <div className="flex-1">
+      <div className="flex-1 min-w-0 flex flex-col h-full min-h-0 overflow-hidden">
+        {isAuthenticated && !isPublicDashboard && <Topbar />}
 
-        <Routes>
+        <main className="flex-1 min-w-0 min-h-0 overflow-y-auto bg-slate-50 text-slate-900">
+          <Routes>
 
           <Route
             path="/"
@@ -98,6 +102,10 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
 
         </Routes>
+        </main>
+        
+        {/* Hovering Quick Action Circle Button (FAB) */}
+        {isAuthenticated && !isPublicDashboard && <QuickActionBar />}
 
       </div>
 

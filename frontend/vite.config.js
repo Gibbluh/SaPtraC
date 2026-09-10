@@ -11,7 +11,7 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
-    allowedHosts: ["happen-outlined-potter-calgary.trycloudflare.com"],
+    allowedHosts: ["championships-guitar-regarding-headed.trycloudflare.com"],
     proxy: {
       "/api": {
         target: "http://localhost:3000",

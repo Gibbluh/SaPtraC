@@ -9,6 +9,8 @@ import CreateMaintenanceModal from "../../components/maintenance/CreateMaintenan
 import React from "react";
 import { useUnitApi } from "../../lib/unitApi";
 import { useUserApi } from "../../lib/userApi";
+import { useLocation } from "react-router-dom";
+import toast from 'react-hot-toast';
 
 const STATUS_COLORS = {
   Pending: "bg-amber-50 text-amber-800 border-amber-200",
@@ -52,6 +54,10 @@ const Loader = () => (
 );
 
 const MaintenanceDashboard = () => {
+  const location = useLocation();
+  const highlightId = location.state?.highlightId;
+  // effectiveHighlightId computed below
+
   const {
     getMaintenance,
     createMaintenance,
@@ -73,6 +79,7 @@ const MaintenanceDashboard = () => {
     user?.role === "Administrator";
 
   const [records, setRecords] = useState([]);
+  const effectiveHighlightId = (highlightId && String(highlightId).startsWith('m') && records?.length > 0) ? records[0]._id : highlightId;
   const [loading, setLoading] = useState(true);
 
   const [editingMaintenance, setEditingMaintenance] = useState(null);
@@ -107,12 +114,28 @@ const MaintenanceDashboard = () => {
       setEditingMaintenance(null);
       setRefreshing((r) => !r);
     } catch (err) {
-      alert(
+      toast.error(
         err?.response?.data?.message ||
           "Failed to update maintenance."
       );
     }
   };
+
+  useEffect(() => {
+    if (effectiveHighlightId && !loading && records.length > 0) {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        const el = document.getElementById(`maintenance-row-${effectiveHighlightId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          clearInterval(interval);
+        }
+        attempts++;
+        if (attempts > 20) clearInterval(interval); // give up after 2 seconds
+      }, 100);
+      return () => clearInterval(interval);
+    }
+  }, [effectiveHighlightId, loading, records.length]);
 
   useEffect(() => {
     const loadDropdowns = async () => {
@@ -145,7 +168,7 @@ const MaintenanceDashboard = () => {
       setOpenCreateModal(false);
       setRefreshing((r) => !r);
     } catch (err) {
-      alert(
+      toast.error(
         err?.response?.data?.message ||
           "Failed to create maintenance record."
       );
@@ -201,7 +224,7 @@ const MaintenanceDashboard = () => {
 
       setRefreshing((r) => !r);
     } catch (err) {
-      alert(
+      toast.error(
         err?.response?.data?.message ||
           "Failed to assign mechanic."
       );
@@ -226,7 +249,7 @@ const MaintenanceDashboard = () => {
 
       setRefreshing((r) => !r);
     } catch (err) {
-      alert(
+      toast.error(
         err?.response?.data?.message ||
           "Failed to update status."
       );
@@ -278,18 +301,7 @@ const MaintenanceDashboard = () => {
       {/* =====================================================
           PAGE HEADER
       ===================================================== */}
-      <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5 mb-7">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-bold text-black tracking-tight">
-            Maintenance Dashboard
-          </h1>
-
-          <p className="mt-1.5 text-sm md:text-base text-black">
-            Manage reported vehicle issues, maintenance status,
-            mechanic assignments, and repair history.
-          </p>
-        </div>
-
+      <div className="flex flex-col xl:flex-row xl:items-center xl:justify-end gap-5 mb-7">
         <form
           className="flex flex-wrap items-center gap-2.5"
           onSubmit={(e) => {
@@ -425,7 +437,10 @@ const MaintenanceDashboard = () => {
                 ) : (
                   records.map((rec) => (
                     <React.Fragment key={rec._id}>
-                      <tr className="border-b border-slate-200 hover:bg-slate-50 transition-colors">
+                      <tr 
+                        id={`maintenance-row-${rec._id}`}
+                        className={`border-b transition-all duration-500 ${effectiveHighlightId === rec._id ? 'bg-blue-100 ring-2 ring-inset ring-blue-500 shadow-md animate-pulse' : 'border-slate-200 hover:bg-slate-50'}`}
+                      >
                         {/* UNIT */}
                         <td className="px-6 py-4 align-middle">
                           <span className="text-sm font-bold text-black whitespace-nowrap">

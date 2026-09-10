@@ -13,8 +13,13 @@ async function regenerateQRCodes() {
   await connectDB();
 
   const drivers = await Driver.find({ deletedAt: null });
-  for (const driver of drivers) {
-    const payload = buildEntityQRPayload("driver", driver._id);
+  let driverNumber = 1;
+  for (const driver of drivers.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))) {
+    if (!driver.driverCode) {
+      driver.driverCode = `DRV-${String(driverNumber).padStart(4, "0")}`;
+    }
+    driverNumber += 1;
+    const payload = buildEntityQRPayload("driver", driver.driverCode);
     driver.qrCode = await generateQRCode(payload);
     await driver.save();
     console.log(`Driver QR updated: ${driver._id}`);

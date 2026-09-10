@@ -7,1481 +7,1314 @@ import React, {
 } from "react";
 import { io } from "socket.io-client";
 import toast from "react-hot-toast";
+import {
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Copy,
+  Bookmark,
+  Trash2,
+  Users,
+  Clock,
+  Layers,
+  Filter,
+  Command,
+  Undo2,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
+  Bell,
+  Sparkles,
+  ArrowLeft
+} from "lucide-react";
 import { useScheduleApi } from "../../lib/scheduleApi";
-import CreateScheduleModal from "../../components/schedules/CreateScheduleModal";
 import api from "../../lib/axios";
-import { Calendar } from "lucide-react";
 
-const ROUTES = [
-  "LANGGAM",
-  "ESTRELLA",
-  "VILLAROSA",
-  "BAYAN-BAYANAN",
-  "CALAMBA",
-];
+import {
+  ROUTES,
+  ROUTE_COLORS,
+  SHIFT_TIMES,
+  getMondayOfWeek,
+  getDaysOfWeek,
+  formatWeekRangeLabel,
+  formatDateFriendly,
+  getRouteForUnit,
+  getRouteConfig
+} from "../../components/schedules/scheduleConstants";
 
-const getRouteForUnit = (bodyNumber) => {
-  const num = parseInt(bodyNumber, 10);
+import AssignmentPopover from "../../components/schedules/AssignmentPopover";
+import ScheduleHistoryDrawer from "../../components/schedules/ScheduleHistoryDrawer";
+import DriverHistoryDrawer from "../../components/schedules/DriverHistoryDrawer";
+import AddUnitToRouteModal from "../../components/schedules/AddUnitToRouteModal";
+import AddNewRouteModal from "../../components/schedules/AddNewRouteModal";
+import CommandPalette from "../../components/schedules/CommandPalette";
 
-  if (isNaN(num)) return null;
+import RoutesOverviewView from "../../components/schedules/views/RoutesOverviewView";
+import RouteDetailView from "../../components/schedules/views/RouteDetailView";
+import WeekSummaryRouteView from "../../components/schedules/views/WeekSummaryRouteView";
 
-  if (num >= 1 && num <= 20) return "LANGGAM";
-
-  if (
-    (num >= 31 && num <= 40) ||
-    (num >= 46 && num <= 52) ||
-    num === 66
-  ) {
-    return "ESTRELLA";
-  }
-
-  if ((num >= 21 && num <= 30) || (num >= 41 && num <= 45)) {
-    return "VILLAROSA";
-  }
-
-  if (num >= 53 && num <= 56) return "BAYAN-BAYANAN";
-
-  if (num >= 57 && num <= 65) return "CALAMBA";
-
-  return null;
-};
-
-const formatDate = (dateStr) => {
-  if (!dateStr) return "";
-
-  const options = {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  };
-
-  return new Date(dateStr).toLocaleDateString("en-US", options);
-};
-
-const formatTimestamp = (ts) => {
-  if (!ts) return "N/A";
-
-  return new Date(ts).toLocaleString("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-};
-
-// Memoized UnitCard Component
-const UnitCard = React.memo(
-  ({
-    unit,
-    drivers,
-    uState,
-    dbState,
-    onDriverChange,
-    onSave,
-    isSaving,
-    isSaved,
-    onTriggerDelete,
-    onTriggerDetails,
-    allAssignedDrivers,
-  }) => {
-    // Determine if a driver is assigned elsewhere
-    const isDriverUnavailable = (driverId, currentShift) => {
-      if (!driverId) return false;
-
-      // Check if driver is assigned in the alternate shift
-      if (
-        currentShift === "first" &&
-        uState.secondShiftDriver === driverId
-      ) {
-        return true;
-      }
-
-      if (
-        currentShift === "second" &&
-        uState.firstShiftDriver === driverId
-      ) {
-        return true;
-      }
-
-      // Check if driver is assigned to any other unit
-      return (
-        allAssignedDrivers.has(driverId) &&
-        uState.firstShiftDriver !== driverId &&
-        uState.secondShiftDriver !== driverId
-      );
-    };
-
-    const hasUnsavedChanges = useMemo(() => {
-      return (
-        uState.firstShiftDriver !== dbState.firstShiftDriver ||
-        uState.secondShiftDriver !== dbState.secondShiftDriver
-      );
-    }, [uState, dbState]);
-
-    const handleRemoveAction = (shift) => {
-      const scheduleId =
-        shift === "first"
-          ? dbState.firstShiftScheduleId
-          : dbState.secondShiftScheduleId;
-
-      if (scheduleId) {
-        onTriggerDelete(scheduleId, unit._id, shift);
-      } else {
-        onDriverChange(unit._id, shift, "");
-      }
-    };
-
-    return (
-      <div className="bg-slate-50/70 border border-slate-200/50 rounded-lg p-4 space-y-4 transition-all duration-150 hover:shadow-xs hover:border-slate-300">
-        {/* Unit Header */}
-        <div
-          onClick={() => onTriggerDetails(unit, dbState)}
-          className="flex justify-between items-center cursor-pointer hover:bg-slate-100 p-2 -m-2 rounded-lg transition-all duration-150 group"
-          title="Click to view assignment details"
-        >
-          <span className="text-sm font-bold text-black tracking-tight group-hover:text-blue-600 transition-colors duration-150">
-            UNIT {unit.bodyNumber || "Unknown"}
-          </span>
-
-          <span className="text-xs text-black font-semibold">
-            {unit.plateNumber}
-          </span>
-        </div>
-
-        {/* First Shift */}
-        <div className="space-y-1.5">
-          <label className="block text-xs font-bold text-black uppercase tracking-wider">
-            First Shift
-          </label>
-
-          <select
-            value={uState.firstShiftDriver}
-            onChange={(e) =>
-              onDriverChange(unit._id, "first", e.target.value)
-            }
-            className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-black shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-150 w-full"
-          >
-            <option value="">Select Driver</option>
-
-            {drivers.map((d) => {
-              const unavailable = isDriverUnavailable(d._id, "first");
-
-              return (
-                <option
-                  key={d._id}
-                  value={d._id}
-                  disabled={unavailable}
-                >
-                  {d.firstName} {d.lastName}
-                  {unavailable ? " (Assigned)" : ""}
-                </option>
-              );
-            })}
-          </select>
-
-          {uState.firstShiftDriver && (
-            <button
-              type="button"
-              onClick={() => handleRemoveAction("first")}
-              className="text-xs text-black hover:text-rose-600 font-bold flex items-center gap-1 mt-1 transition-colors duration-150 active:scale-95"
-            >
-              🗑 Remove Assignment
-            </button>
-          )}
-        </div>
-
-        {/* Second Shift */}
-        <div className="space-y-1.5">
-          <label className="block text-xs font-bold text-black uppercase tracking-wider">
-            Second Shift
-          </label>
-
-          <select
-            value={uState.secondShiftDriver}
-            onChange={(e) =>
-              onDriverChange(unit._id, "second", e.target.value)
-            }
-            className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-black shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-150 w-full"
-          >
-            <option value="">Select Driver</option>
-
-            {drivers.map((d) => {
-              const unavailable = isDriverUnavailable(d._id, "second");
-
-              return (
-                <option
-                  key={d._id}
-                  value={d._id}
-                  disabled={unavailable}
-                >
-                  {d.firstName} {d.lastName}
-                  {unavailable ? " (Assigned)" : ""}
-                </option>
-              );
-            })}
-          </select>
-
-          {uState.secondShiftDriver && (
-            <button
-              type="button"
-              onClick={() => handleRemoveAction("second")}
-              className="text-xs text-black hover:text-rose-600 font-bold flex items-center gap-1 mt-1 transition-colors duration-150 active:scale-95"
-            >
-              🗑 Remove Assignment
-            </button>
-          )}
-        </div>
-
-        {/* Save / Status Button */}
-        <button
-          onClick={() => onSave(unit._id)}
-          disabled={isSaving || isSaved}
-          className={`w-full mt-2 px-3 py-2 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 active:scale-95 hover:shadow-md flex items-center justify-center gap-1.5 ${
-            isSaving
-              ? "bg-blue-400 cursor-not-allowed"
-              : isSaved
-              ? "bg-green-600 cursor-not-allowed"
-              : hasUnsavedChanges
-              ? "bg-orange-500 hover:bg-orange-600"
-              : "bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
-          }`}
-        >
-          {isSaving
-            ? "Saving Assignment..."
-            : isSaved
-            ? "✔ Saved"
-            : hasUnsavedChanges
-            ? "● Unsaved Changes"
-            : "Save Assignment"}
-        </button>
-      </div>
-    );
-  }
-);
-
+/**
+ * SchedulingBoard: Route-Focused Progressive Disclosure
+ * Level 1: Routes Overview (Default summary grid)
+ * Level 2: Route Detail (Single route unit & shift table)
+ * Level 3: Assignment Popover (Driver dispatch & conflict check)
+ * Level 4: Week Summary (One route x 7 days)
+ */
 const SchedulingBoard = () => {
+  const {
+    getSchedules,
+    getSingleSchedule,
+    createSchedule,
+    updateSchedule,
+    deleteSchedule,
+  } = useScheduleApi();
+
+  // Core date state (defaults to today)
   const [selectedDate, setSelectedDate] = useState(() => {
     return new Date().toISOString().slice(0, 10);
   });
 
-  const [drivers, setDrivers] = useState([]);
-  const [units, setUnits] = useState([]);
-  const [schedules, setSchedules] = useState([]);
-  const [recentDates, setRecentDates] = useState([]);
-  const [dropdownStates, setDropdownStates] = useState({});
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [savingUnitId, setSavingUnitId] = useState(null);
-  const [savedStatuses, setSavedStatuses] = useState({});
-
-  // Details Modal State
-  const [detailsModal, setDetailsModal] = useState({
-    isOpen: false,
-    unit: null,
-    dbState: null,
+  // Current active week start for Week Summary (Monday)
+  const [currentWeekStartDate, setCurrentWeekStartDate] = useState(() => {
+    return getMondayOfWeek(new Date());
   });
 
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [firstShiftDetail, setFirstShiftDetail] = useState(null);
-  const [secondShiftDetail, setSecondShiftDetail] = useState(null);
+  // Custom Routes (stored in localStorage)
+  const [customRoutes, setCustomRoutes] = useState(() => {
+    try {
+      const stored = localStorage.getItem("CTMS_CUSTOM_ROUTES");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
 
-  // Confirm Delete State
-  const [confirmDelete, setConfirmDelete] = useState({
-    isOpen: false,
-    scheduleId: null,
-    unitId: null,
-    shiftType: null,
+  // All active routes (Default + Custom)
+  const allRoutes = useMemo(() => {
+    const customKeys = Object.keys(customRoutes);
+    return [...ROUTES, ...customKeys.filter((k) => !ROUTES.includes(k))];
+  }, [customRoutes]);
+
+  // Modals & Slide-over Drawers state
+  const [isAddUnitModalOpen, setIsAddUnitModalOpen] = useState(false);
+  const [addUnitTargetRoute, setAddUnitTargetRoute] = useState("LANGGAM");
+  const [isAddNewRouteModalOpen, setIsAddNewRouteModalOpen] = useState(false);
+  const [historyDriver, setHistoryDriver] = useState(null);
+  const [isDriverHistoryOpen, setIsDriverHistoryOpen] = useState(false);
+
+  // Progressive Disclosure Navigation
+  // activeTab: 'ROUTES' (Level 1 / 2) | 'WEEK_SUMMARY' (Level 4)
+  const [activeTab, setActiveTab] = useState("ROUTES");
+  // selectedRouteKey: null (Level 1: Routes Overview) | string e.g. "LANGGAM" (Level 2: Route Detail)
+  const [selectedRouteKey, setSelectedRouteKey] = useState(null);
+
+  // Filters
+  const [routeFilter, setRouteFilter] = useState("ALL");
+  const [shiftFilter, setShiftFilter] = useState("ALL");
+
+  // Data state
+  const [units, setUnits] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [schedules, setSchedules] = useState([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isActionSubmitting, setIsActionSubmitting] = useState(false);
+
+  // Draft mode for UI changes
+  const [pendingChanges, setPendingChanges] = useState({});
+
+  const displaySchedules = useMemo(() => {
+    let current = [...schedules];
+    
+    // Apply pending deletes
+    current = current.filter(s => {
+      const sUnit = s.unit?._id || s.unit;
+      const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0,10) : "";
+      const key = `${sUnit}_${s.shiftType}_${sDate}`;
+      return !(pendingChanges[key] && pendingChanges[key].status === 'DELETED');
+    });
+
+    // Apply pending adds and updates
+    Object.values(pendingChanges).forEach(pc => {
+      if (pc.status === 'DELETED') return;
+
+      const existingIdx = current.findIndex(s => {
+        const sUnit = s.unit?._id || s.unit;
+        const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0,10) : "";
+        return sUnit === pc.unitId && s.shiftType === pc.shiftType && sDate === pc.dateStr;
+      });
+
+      const updatedRecord = {
+        _id: pc.scheduleId || `draft_${pc.unitId}_${pc.shiftType}`,
+        driver: drivers.find(d => d._id === pc.driverId),
+        unit: units.find(u => u._id === pc.unitId),
+        shiftType: pc.shiftType,
+        shiftDate: pc.dateStr,
+        route: pc.route,
+        isDraft: true,
+      };
+
+      if (existingIdx !== -1) {
+        current[existingIdx] = { ...current[existingIdx], ...updatedRecord };
+      } else {
+        current.push(updatedRecord);
+      }
+    });
+
+    return current;
+  }, [schedules, pendingChanges, drivers, units]);
+
+  // Undo Stack (up to 10 historical operations)
+  const [undoStack, setUndoStack] = useState([]);
+
+  // Assignment Popover (Level 3) state
+  const [isAssignPopoverOpen, setIsAssignPopoverOpen] = useState(false);
+  const [assignPopoverData, setAssignPopoverData] = useState({});
+
+  // Unit Schedule History Slide-over Drawer state
+  const [historyDrawerUnit, setHistoryDrawerUnit] = useState(null);
+  const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] = useState(false);
+
+  // Command palette modal
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+
+  // Saved templates in localStorage
+  const [savedTemplates, setSavedTemplates] = useState(() => {
+    try {
+      const stored = localStorage.getItem("CTMS_SCHEDULE_TEMPLATES");
+      return stored
+        ? JSON.parse(stored)
+        : [
+            {
+              id: "tpl-default-1",
+              name: "Regular Monday Fleet",
+              createdAt: new Date().toISOString(),
+              assignments: [],
+            },
+          ];
+    } catch {
+      return [];
+    }
   });
 
   const socketRef = useRef(null);
 
-  const { getSchedules, getSingleSchedule } = useScheduleApi();
-
-  // Load active and non-archived drivers & all units on mount
+  // 1. Fetch initial Units & Drivers
   useEffect(() => {
-    const initDropdownData = async () => {
-      setInitialLoading(true);
-
+    let isMounted = true;
+    const fetchResources = async () => {
       try {
-        const [driversRes, unitsRes] = await Promise.all([
-          api.get("/drivers", {
-            params: {
-              limit: 1000,
-              status: "Active",
-            },
-          }),
-          api.get("/units", {
-            params: {
-              limit: 1000,
-            },
-          }),
+        const [unitsRes, driversRes] = await Promise.all([
+          api.get("/units?limit=100"),
+          api.get("/drivers?limit=100"),
         ]);
-
-        const activeDrivers = (driversRes.data.drivers || []).filter(
-          (d) => d.status === "Active" && !d.deletedAt
-        );
-
-        setDrivers(activeDrivers);
-
-        const activeUnits = (unitsRes.data.units || []).filter(
-          (u) => !u.deletedAt
-        );
-
-        activeUnits.sort((a, b) => {
-          const numA = parseInt(a.bodyNumber, 10) || 0;
-          const numB = parseInt(b.bodyNumber, 10) || 0;
-
-          return numA - numB;
-        });
-
-        setUnits(activeUnits);
+        if (isMounted) {
+          setUnits(unitsRes.data.units || unitsRes.data || []);
+          setDrivers(driversRes.data.drivers || driversRes.data || []);
+        }
       } catch (err) {
-        console.error("Failed to load initial data", err);
-        setError("Failed to load initial dropdown data.");
-      } finally {
-        setInitialLoading(false);
+        console.error("Failed to load resources:", err);
       }
     };
-
-    initDropdownData();
+    fetchResources();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Fetch board schedules for selected date, and recent history
-  const fetchBoardData = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const [dateSchedulesRes, allSchedulesRes] =
-        await Promise.all([
-          getSchedules({
-            date: selectedDate,
-            limit: 1000,
-          }),
-          getSchedules({
-            limit: 1000,
-          }),
-        ]);
-
-      const dateSchedules = dateSchedulesRes.schedules || [];
-      setSchedules(dateSchedules);
-
-      const allSchedules =
-        allSchedulesRes.schedules || [];
-
-      const dates = allSchedules
-        .map((s) => {
-          if (!s.shiftDate) return null;
-
-          return new Date(s.shiftDate)
-            .toISOString()
-            .slice(0, 10);
-        })
-        .filter(Boolean);
-
-      const uniqueDates = Array.from(new Set(dates)).slice(
-        0,
-        10
-      );
-
-      setRecentDates(uniqueDates);
-    } catch (err) {
-      console.error("Failed to load schedules", err);
-      setError("Failed to load schedules.");
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedDate]);
-
-  // Trigger fetch when date changes
-  useEffect(() => {
-    fetchBoardData();
-  }, [fetchBoardData]);
-
-  // Setup dynamic dropdown values state mapping
-  useEffect(() => {
-    if (units.length === 0) return;
-
-    const initialStates = {};
-
-    units.forEach((unit) => {
-      initialStates[unit._id] = {
-        unitId: unit._id,
-        firstShiftDriver: "",
-        secondShiftDriver: "",
-      };
-    });
-
-    schedules.forEach((schedule) => {
-      const unitId =
-        schedule.unit?._id || schedule.unit;
-
-      const driverId =
-        schedule.driver?._id || schedule.driver;
-
-      if (unitId && driverId && initialStates[unitId]) {
-        if (schedule.shiftType === "First Shift") {
-          initialStates[unitId].firstShiftDriver =
-            driverId;
-        } else if (
-          schedule.shiftType === "Second Shift"
-        ) {
-          initialStates[unitId].secondShiftDriver =
-            driverId;
-        }
-      }
-    });
-
-    setDropdownStates(initialStates);
-  }, [schedules, units]);
-
-  // Load detailed schedule metadata
-  useEffect(() => {
-    if (
-      !detailsModal.isOpen ||
-      !detailsModal.dbState
-    ) {
-      return;
-    }
-
-    const loadDetails = async () => {
-      setDetailsLoading(true);
-      setFirstShiftDetail(null);
-      setSecondShiftDetail(null);
-
+  // 2. Fetch Schedules (Non-destructive, silent background sync)
+  const fetchSchedules = useCallback(
+    async (isBackground = false) => {
       try {
-        const promises = [];
-        const dbState = detailsModal.dbState;
-
-        if (dbState.firstShiftScheduleId) {
-          promises.push(
-            getSingleSchedule(
-              dbState.firstShiftScheduleId
-            ).then((res) => {
-              setFirstShiftDetail(
-                res.schedule || res
-              );
-            })
-          );
+        if (isBackground) {
+          setIsSyncing(true);
         }
-
-        if (dbState.secondShiftScheduleId) {
-          promises.push(
-            getSingleSchedule(
-              dbState.secondShiftScheduleId
-            ).then((res) => {
-              setSecondShiftDetail(
-                res.schedule || res
-              );
-            })
-          );
-        }
-
-        await Promise.all(promises);
+        const res = await getSchedules({ limit: 500 });
+        const data = res.schedules || res || [];
+        setSchedules(data);
       } catch (err) {
-        console.error(
-          "Failed to load schedule details",
-          err
-        );
-
-        toast.error(
-          "Failed to load assignment details."
-        );
+        console.error("Failed to fetch schedules:", err);
       } finally {
-        setDetailsLoading(false);
+        if (isBackground) {
+          setIsSyncing(false);
+        } else {
+          setInitialLoading(false);
+        }
       }
-    };
-
-    loadDetails();
-  }, [
-    detailsModal.isOpen,
-    detailsModal.dbState,
-    getSingleSchedule,
-  ]);
-
-  // Socket.io listener ref trick to avoid reconnect loops
-  const fetchBoardDataRef = useRef(fetchBoardData);
+    },
+    [getSchedules]
+  );
 
   useEffect(() => {
-    fetchBoardDataRef.current =
-      fetchBoardData;
-  }, [fetchBoardData]);
+    fetchSchedules(false);
+  }, [fetchSchedules]);
 
+  // Keep a stable ref to fetchSchedules to avoid socket churn
+  const fetchSchedulesRef = useRef(fetchSchedules);
+  useEffect(() => {
+    fetchSchedulesRef.current = fetchSchedules;
+  }, [fetchSchedules]);
+
+  // 3. Socket.IO Real-time Synchronization
   useEffect(() => {
     const socket = io(window.location.origin, {
       path: "/socket.io",
-      transports: ["websocket"],
-      withCredentials: true,
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
     });
-
     socketRef.current = socket;
 
-    const refreshData = () => {
-      fetchBoardDataRef.current();
+    let debounceTimer = null;
+    const debouncedSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (fetchSchedulesRef.current) {
+          fetchSchedulesRef.current(true);
+        }
+      }, 300);
     };
 
-    const SCHEDULE_EVENTS = [
-      "scheduleCreated",
-      "scheduleUpdated",
-      "scheduleDeleted",
-      "driverReplaced",
-      "statusChanged",
-    ];
-
-    SCHEDULE_EVENTS.forEach((event) => {
-      socket.on(event, refreshData);
-    });
+    socket.on("scheduleCreated", debouncedSync);
+    socket.on("scheduleUpdated", debouncedSync);
+    socket.on("scheduleDeleted", debouncedSync);
+    socket.on("scheduleEvent", debouncedSync);
 
     return () => {
-      SCHEDULE_EVENTS.forEach((event) =>
-        socket.off(event)
-      );
-
+      if (debounceTimer) clearTimeout(debounceTimer);
       socket.disconnect();
     };
   }, []);
 
-  // Callback to handle local select value state update
-  const handleDriverChange = useCallback(
-    (unitId, shift, driverId) => {
-      setDropdownStates((prev) => ({
-        ...prev,
-        [unitId]: {
-          ...prev[unitId],
-          [shift === "first"
-            ? "firstShiftDriver"
-            : "secondShiftDriver"]: driverId,
-        },
-      }));
-    },
-    []
-  );
-
-  // Compute Set of all assigned drivers on the board
-  const allAssignedDrivers = useMemo(() => {
-    const assigned = new Set();
-
-    Object.values(dropdownStates).forEach(
-      (state) => {
-        if (state.firstShiftDriver) {
-          assigned.add(state.firstShiftDriver);
-        }
-
-        if (state.secondShiftDriver) {
-          assigned.add(state.secondShiftDriver);
-        }
-      }
-    );
-
-    return assigned;
-  }, [dropdownStates]);
-
-  // Compute current database state
-  const dbStateForUnit = useMemo(() => {
-    const mapping = {};
-
-    units.forEach((unit) => {
-      mapping[unit._id] = {
-        firstShiftDriver: "",
-        secondShiftDriver: "",
-        firstShiftScheduleId: null,
-        secondShiftScheduleId: null,
-        firstShiftSchedule: null,
-        secondShiftSchedule: null,
-      };
-    });
-
-    schedules.forEach((schedule) => {
-      const unitId =
-        schedule.unit?._id || schedule.unit;
-
-      const driverId =
-        schedule.driver?._id || schedule.driver;
-
-      if (unitId && driverId && mapping[unitId]) {
-        if (schedule.shiftType === "First Shift") {
-          mapping[unitId].firstShiftDriver =
-            driverId;
-
-          mapping[unitId].firstShiftScheduleId =
-            schedule._id;
-
-          mapping[unitId].firstShiftSchedule =
-            schedule;
-        } else if (
-          schedule.shiftType === "Second Shift"
-        ) {
-          mapping[unitId].secondShiftDriver =
-            driverId;
-
-          mapping[unitId].secondShiftScheduleId =
-            schedule._id;
-
-          mapping[unitId].secondShiftSchedule =
-            schedule;
-        }
-      }
-    });
-
-    return mapping;
-  }, [schedules, units]);
-
-  // Validate shift assignments
-  const validateAssignment = (
-    unitId,
-    firstDriver,
-    secondDriver
-  ) => {
-    if (
-      firstDriver &&
-      firstDriver === secondDriver
-    ) {
-      return "A driver cannot be assigned to both shifts on the same unit.";
-    }
-
-    if (firstDriver) {
-      const duplicateUnit = Object.entries(
-        dropdownStates
-      ).find(([uId, state]) => {
-        if (uId === unitId) return false;
-
-        return (
-          state.firstShiftDriver ===
-            firstDriver ||
-          state.secondShiftDriver ===
-            firstDriver
-        );
-      });
-
-      if (duplicateUnit) {
-        const otherUnit = units.find(
-          (u) => u._id === duplicateUnit[0]
-        );
-
-        const driver = drivers.find(
-          (d) => d._id === firstDriver
-        );
-
-        const driverName = driver
-          ? `${driver.firstName} ${driver.lastName}`
-          : "Driver";
-
-        const unitNum = otherUnit
-          ? `Unit ${otherUnit.bodyNumber}`
-          : "another unit";
-
-        const duplicateShift =
-          duplicateUnit[1].firstShiftDriver ===
-          firstDriver
-            ? "First Shift"
-            : "Second Shift";
-
-        return `${driverName} is already assigned to ${unitNum} (${duplicateShift}).`;
-      }
-    }
-
-    if (secondDriver) {
-      const duplicateUnit = Object.entries(
-        dropdownStates
-      ).find(([uId, state]) => {
-        if (uId === unitId) return false;
-
-        return (
-          state.firstShiftDriver ===
-            secondDriver ||
-          state.secondShiftDriver ===
-            secondDriver
-        );
-      });
-
-      if (duplicateUnit) {
-        const otherUnit = units.find(
-          (u) => u._id === duplicateUnit[0]
-        );
-
-        const driver = drivers.find(
-          (d) => d._id === secondDriver
-        );
-
-        const driverName = driver
-          ? `${driver.firstName} ${driver.lastName}`
-          : "Driver";
-
-        const unitNum = otherUnit
-          ? `Unit ${otherUnit.bodyNumber}`
-          : "another unit";
-
-        const duplicateShift =
-          duplicateUnit[1].firstShiftDriver ===
-          secondDriver
-            ? "First Shift"
-            : "Second Shift";
-
-        return `${driverName} is already assigned to ${unitNum} (${duplicateShift}).`;
-      }
-    }
-
-    return null;
+  // Undo helper
+  const pushUndoAction = (action) => {
+    setUndoStack((prev) => [action, ...prev.slice(0, 9)]);
   };
 
-  // Perform permanent MongoDB Save Assignment operation
-  const handleSaveAssignment = useCallback(
-    async (unitId) => {
-      const uState =
-        dropdownStates[unitId];
+  // Undo Last Action
+  const handleUndo = async () => {
+    if (undoStack.length === 0) {
+      toast("No actions to undo", { icon: "ℹ️" });
+      return;
+    }
 
-      if (!uState) return;
-
-      const unit = units.find(
-        (u) => u._id === unitId
-      );
-
-      const unitRoute =
-        getRouteForUnit(unit?.bodyNumber) ||
-        unit?.route ||
-        "Unassigned";
-
-      const validationError =
-        validateAssignment(
-          unitId,
-          uState.firstShiftDriver,
-          uState.secondShiftDriver
-        );
-
-      if (validationError) {
-        toast.error(validationError);
-        return;
-      }
-
-      setSavingUnitId(unitId);
-
-      try {
-        const dbState =
-          dbStateForUnit[unitId] || {};
-
-        const existingFirst =
-          dbState.firstShiftSchedule;
-
-        const existingSecond =
-          dbState.secondShiftSchedule;
-
-        const selectedFirst =
-          uState.firstShiftDriver;
-
-        const selectedSecond =
-          uState.secondShiftDriver;
-
-        const promises = [];
-
-        let isUpdate = false;
-        let isCreate = false;
-
-        // 1. First Shift
-        if (!selectedFirst) {
-          if (existingFirst) {
-            promises.push(
-              api.delete(
-                `/schedules/${existingFirst._id}`
-              )
-            );
-          }
-        } else {
-          if (!existingFirst) {
-            isCreate = true;
-
-            promises.push(
-              api.post("/schedules", {
-                driver: selectedFirst,
-                unit: unitId,
-                shiftDate: selectedDate,
-                shiftType: "First Shift",
-                shiftStart: "05:00",
-                shiftEnd: "13:00",
-                route: unitRoute,
-              })
-            );
-          } else if (
-            (existingFirst.driver?._id ||
-              existingFirst.driver) !==
-            selectedFirst
-          ) {
-            isUpdate = true;
-
-            promises.push(
-              api.put(
-                `/schedules/${existingFirst._id}`,
-                {
-                  ...existingFirst,
-                  driver: selectedFirst,
-                }
-              )
-            );
-          }
-        }
-
-        // 2. Second Shift
-        if (!selectedSecond) {
-          if (existingSecond) {
-            promises.push(
-              api.delete(
-                `/schedules/${existingSecond._id}`
-              )
-            );
-          }
-        } else {
-          if (!existingSecond) {
-            isCreate = true;
-
-            promises.push(
-              api.post("/schedules", {
-                driver: selectedSecond,
-                unit: unitId,
-                shiftDate: selectedDate,
-                shiftType: "Second Shift",
-                shiftStart: "13:00",
-                shiftEnd: "21:00",
-                route: unitRoute,
-              })
-            );
-          } else if (
-            (existingSecond.driver?._id ||
-              existingSecond.driver) !==
-            selectedSecond
-          ) {
-            isUpdate = true;
-
-            promises.push(
-              api.put(
-                `/schedules/${existingSecond._id}`,
-                {
-                  ...existingSecond,
-                  driver: selectedSecond,
-                }
-              )
-            );
-          }
-        }
-
-        if (promises.length > 0) {
-          await Promise.all(promises);
-
-          if (isUpdate) {
-            toast.success(
-              "✔ Assignment updated successfully."
-            );
-          } else if (isCreate) {
-            toast.success(
-              "✔ Assignment saved successfully."
-            );
-          } else {
-            toast.success(
-              "✔ Assignment removed successfully."
-            );
-          }
-
-          await fetchBoardData();
-
-          setSavedStatuses((prev) => ({
-            ...prev,
-            [unitId]: true,
-          }));
-
-          setTimeout(() => {
-            setSavedStatuses((prev) => ({
-              ...prev,
-              [unitId]: false,
-            }));
-          }, 2000);
-        } else {
-          toast.success(
-            "No changes to save"
-          );
-        }
-      } catch (err) {
-        console.error(err);
-
-        toast.error(
-          err?.response?.data?.message ||
-            err.message ||
-            "Failed to save assignments"
-        );
-      } finally {
-        setSavingUnitId(null);
-      }
-    },
-    [
-      dropdownStates,
-      units,
-      dbStateForUnit,
-      selectedDate,
-      fetchBoardData,
-      drivers,
-    ]
-  );
-
-  // Trigger Confirmation Modal for Saved Assignment Delete
-  const handleTriggerDelete = useCallback(
-    (scheduleId, unitId, shiftType) => {
-      setConfirmDelete({
-        isOpen: true,
-        scheduleId,
-        unitId,
-        shiftType,
-      });
-    },
-    []
-  );
-
-  // Confirm delete handler
-  const handleConfirmDelete = async () => {
-    const { scheduleId } =
-      confirmDelete;
-
-    if (!scheduleId) return;
+    const [lastAction, ...remaining] = undoStack;
+    setUndoStack(remaining);
 
     try {
-      await api.delete(
-        `/schedules/${scheduleId}`
+      if (lastAction.type === "CREATE") {
+        await deleteSchedule(lastAction.scheduleId);
+        toast.success("Undid assignment creation.", { icon: "↩️" });
+      } else if (lastAction.type === "DELETE") {
+        const s = lastAction.prevSchedule;
+        const shiftTimes = SHIFT_TIMES[s.shiftType] || SHIFT_TIMES["First Shift"];
+        await createSchedule({
+          driver: s.driver?._id || s.driver,
+          unit: s.unit?._id || s.unit,
+          shiftDate: s.shiftDate,
+          shiftType: s.shiftType,
+          shiftStart: shiftTimes.start,
+          shiftEnd: shiftTimes.end,
+          route: s.route,
+        });
+        toast.success("Restored deleted assignment.", { icon: "↩️" });
+      } else if (lastAction.type === "UPDATE") {
+        await updateSchedule(lastAction.prevSchedule._id, {
+          driver: lastAction.prevSchedule.driver?._id || lastAction.prevSchedule.driver,
+          unit: lastAction.prevSchedule.unit?._id || lastAction.prevSchedule.unit,
+          shiftDate: lastAction.prevSchedule.shiftDate,
+          shiftType: lastAction.prevSchedule.shiftType,
+          route: lastAction.prevSchedule.route,
+        });
+        toast.success("Reverted assignment update.", { icon: "↩️" });
+      }
+
+      await fetchSchedules(true);
+    } catch (err) {
+      console.error("Undo failed:", err);
+      toast.error("Failed to revert action.");
+    }
+  };
+
+  // Stage Assignment (Draft Mode)
+  const handleStageAssignment = ({
+    unitId,
+    driverId,
+    dateStr,
+    shiftType,
+    route,
+    existingScheduleId,
+    reassignScheduleId,
+  }) => {
+    setPendingChanges(prev => {
+      const next = { ...prev };
+      const key = `${unitId}_${shiftType}_${dateStr}`;
+      
+      if (reassignScheduleId) {
+         const oldS = schedules.find(s => s._id === reassignScheduleId);
+         if (oldS) {
+            const oldDate = oldS.shiftDate ? new Date(oldS.shiftDate).toISOString().slice(0,10) : "";
+            const oldUnit = oldS.unit?._id || oldS.unit;
+            const oldKey = `${oldUnit}_${oldS.shiftType}_${oldDate}`;
+            next[oldKey] = { status: 'DELETED', scheduleId: oldS._id, unitId: oldUnit, shiftType: oldS.shiftType, dateStr: oldDate };
+         }
+      }
+
+      next[key] = {
+        unitId,
+        driverId,
+        dateStr,
+        shiftType,
+        route,
+        scheduleId: existingScheduleId,
+        status: existingScheduleId ? 'UPDATED' : 'ADDED',
+      };
+      return next;
+    });
+    setIsAssignPopoverOpen(false);
+  };
+
+  // Drag and Drop Swapping / Assigning
+  const handleSwapOrAssign = (sourceData, targetData) => {
+    setPendingChanges(prev => {
+      const next = { ...prev };
+      
+      const sDate = sourceData.sourceDateStr || selectedDate;
+      const tDate = targetData.targetDateStr || selectedDate;
+
+      const sKey = `${sourceData.sourceUnitId}_${sourceData.sourceShiftType}_${sDate}`;
+      const tKey = `${targetData.targetUnitId}_${targetData.targetShiftType}_${tDate}`;
+
+      const targetSchedule = displaySchedules.find(s => {
+         const sUnit = s.unit?._id || s.unit;
+         return sUnit === targetData.targetUnitId && s.shiftType === targetData.targetShiftType && new Date(s.shiftDate).toISOString().slice(0,10) === tDate;
+      });
+      const targetDriverId = targetSchedule?.driver?._id;
+
+      if (targetDriverId) {
+         next[sKey] = {
+            unitId: sourceData.sourceUnitId,
+            shiftType: sourceData.sourceShiftType,
+            dateStr: sDate,
+            route: getRouteForUnit(units.find(u => u._id === sourceData.sourceUnitId)?.bodyNumber),
+            driverId: targetDriverId,
+            scheduleId: sourceData.sourceScheduleId,
+            status: sourceData.sourceScheduleId ? 'UPDATED' : 'ADDED'
+         };
+
+         next[tKey] = {
+            unitId: targetData.targetUnitId,
+            shiftType: targetData.targetShiftType,
+            dateStr: tDate,
+            route: getRouteForUnit(units.find(u => u._id === targetData.targetUnitId)?.bodyNumber),
+            driverId: sourceData.sourceDriverId,
+            scheduleId: targetData.targetScheduleId,
+            status: targetData.targetScheduleId ? 'UPDATED' : 'ADDED'
+         };
+      } else {
+         next[sKey] = {
+            unitId: sourceData.sourceUnitId,
+            shiftType: sourceData.sourceShiftType,
+            dateStr: sDate,
+            scheduleId: sourceData.sourceScheduleId,
+            status: 'DELETED'
+         };
+
+         next[tKey] = {
+            unitId: targetData.targetUnitId,
+            shiftType: targetData.targetShiftType,
+            dateStr: tDate,
+            route: getRouteForUnit(units.find(u => u._id === targetData.targetUnitId)?.bodyNumber),
+            driverId: sourceData.sourceDriverId,
+            scheduleId: targetData.targetScheduleId,
+            status: targetData.targetScheduleId ? 'UPDATED' : 'ADDED'
+         };
+      }
+      return next;
+    });
+  };
+
+  // Stage Remove Assignment
+  const handleStageRemoveAssignment = (scheduleId) => {
+    const s = displaySchedules.find(x => x._id === scheduleId);
+    if (!s) return;
+    
+    const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0,10) : "";
+    const sUnitId = s.unit?._id || s.unit;
+    
+    setPendingChanges(prev => {
+       const next = { ...prev };
+       const key = `${sUnitId}_${s.shiftType}_${sDate}`;
+       if (s.isDraft && s.status === 'ADDED') {
+          delete next[key];
+       } else {
+          next[key] = {
+             status: 'DELETED',
+             scheduleId: s._id,
+             unitId: sUnitId,
+             shiftType: s.shiftType,
+             dateStr: sDate
+          };
+       }
+       return next;
+    });
+    setIsAssignPopoverOpen(false);
+  };
+
+  // Commit All Draft Changes
+  const handleCommitChanges = async () => {
+    setIsActionSubmitting(true);
+    let successCount = 0;
+    
+    try {
+      const ops = Object.values(pendingChanges);
+      for (const pc of ops) {
+        if (pc.status === 'DELETED' && pc.scheduleId && !pc.scheduleId.startsWith('draft')) {
+          await deleteSchedule(pc.scheduleId);
+          successCount++;
+        } else if (pc.status === 'UPDATED' && pc.scheduleId && !pc.scheduleId.startsWith('draft')) {
+          const shiftTimes = SHIFT_TIMES[pc.shiftType] || SHIFT_TIMES["First Shift"];
+          await updateSchedule(pc.scheduleId, {
+            driver: pc.driverId,
+            unit: pc.unitId,
+            shiftDate: pc.dateStr,
+            shiftType: pc.shiftType,
+            shiftStart: shiftTimes.start,
+            shiftEnd: shiftTimes.end,
+            route: pc.route,
+          });
+          successCount++;
+        } else if (pc.status === 'ADDED') {
+          const shiftTimes = SHIFT_TIMES[pc.shiftType] || SHIFT_TIMES["First Shift"];
+          await createSchedule({
+            driver: pc.driverId,
+            unit: pc.unitId,
+            shiftDate: pc.dateStr,
+            shiftType: pc.shiftType,
+            shiftStart: shiftTimes.start,
+            shiftEnd: shiftTimes.end,
+            route: pc.route,
+          });
+          successCount++;
+        }
+      }
+      toast.success(`Successfully saved ${successCount} changes and notified drivers.`, { icon: "✅" });
+      setPendingChanges({});
+      await fetchSchedules(true);
+    } catch (err) {
+      console.error("Failed to commit changes:", err);
+      toast.error("Some changes failed to save.");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
+
+  // Bulk: Copy from Yesterday for Route
+  const handleCopyFromYesterday = async (routeKey) => {
+    setIsActionSubmitting(true);
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() - 1);
+    const yesterdayStr = d.toISOString().slice(0, 10);
+
+    const routeUnits = units.filter(
+      (u) => getRouteForUnit(u.bodyNumber, u.route) === routeKey
+    );
+    const unitIds = new Set(routeUnits.map((u) => u._id));
+
+    // Find valid assignments on yesterday
+    const yesterdaySchedules = schedules.filter((s) => {
+      const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0, 10) : "";
+      const sUnitId = s.unit?._id || s.unit;
+      const sDriverId = s.driver?._id || s.driver;
+      return sDate === yesterdayStr && unitIds.has(sUnitId) && sDriverId;
+    });
+
+    if (yesterdaySchedules.length === 0) {
+      toast(`No assignments found on ${formatDateFriendly(yesterdayStr)} to copy.`, {
+        icon: "ℹ️",
+      });
+      setIsActionSubmitting(false);
+      return;
+    }
+
+    let copiedCount = 0;
+    try {
+      for (const s of yesterdaySchedules) {
+        const uId = s.unit?._id || s.unit;
+        const dId = s.driver?._id || s.driver;
+        const shiftTimes = SHIFT_TIMES[s.shiftType] || SHIFT_TIMES["First Shift"];
+
+        // Check if slot already has assignment on selectedDate
+        const alreadyExists = schedules.some((ex) => {
+          const exDate = ex.shiftDate ? new Date(ex.shiftDate).toISOString().slice(0, 10) : "";
+          const exUnitId = ex.unit?._id || ex.unit;
+          return exDate === selectedDate && exUnitId === uId && ex.shiftType === s.shiftType;
+        });
+
+        if (!alreadyExists) {
+          try {
+            const res = await createSchedule({
+              driver: dId,
+              unit: uId,
+              shiftDate: selectedDate,
+              shiftType: s.shiftType,
+              shiftStart: shiftTimes.start,
+              shiftEnd: shiftTimes.end,
+              route: s.route || routeKey,
+            });
+            pushUndoAction({
+              type: "CREATE",
+              scheduleId: (res.schedule || res)._id,
+            });
+            copiedCount++;
+          } catch {
+            // ignore individual conflict
+          }
+        }
+      }
+
+      toast.success(
+        `Copied ${copiedCount} assignments from yesterday (${formatDateFriendly(yesterdayStr)})!`,
+        { icon: "📋" }
+      );
+      await fetchSchedules(true);
+    } catch (err) {
+      console.error("Failed to copy from yesterday:", err);
+      toast.error("Failed to copy assignments.");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
+
+  // Bulk: Copy from Last Week for Route
+  const handleCopyFromLastWeek = async (routeKey) => {
+    setIsActionSubmitting(true);
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() - 7);
+    const lastWeekStr = d.toISOString().slice(0, 10);
+
+    const routeUnits = units.filter(
+      (u) => getRouteForUnit(u.bodyNumber, u.route) === routeKey
+    );
+    const unitIds = new Set(routeUnits.map((u) => u._id));
+
+    const lastWeekSchedules = schedules.filter((s) => {
+      const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0, 10) : "";
+      const sUnitId = s.unit?._id || s.unit;
+      const sDriverId = s.driver?._id || s.driver;
+      return sDate === lastWeekStr && unitIds.has(sUnitId) && sDriverId;
+    });
+
+    if (lastWeekSchedules.length === 0) {
+      toast(`No assignments found on ${formatDateFriendly(lastWeekStr)} to copy.`, {
+        icon: "ℹ️",
+      });
+      setIsActionSubmitting(false);
+      return;
+    }
+
+    let copiedCount = 0;
+    try {
+      for (const s of lastWeekSchedules) {
+        const uId = s.unit?._id || s.unit;
+        const dId = s.driver?._id || s.driver;
+        const shiftTimes = SHIFT_TIMES[s.shiftType] || SHIFT_TIMES["First Shift"];
+
+        const alreadyExists = schedules.some((ex) => {
+          const exDate = ex.shiftDate ? new Date(ex.shiftDate).toISOString().slice(0, 10) : "";
+          const exUnitId = ex.unit?._id || ex.unit;
+          return exDate === selectedDate && exUnitId === uId && ex.shiftType === s.shiftType;
+        });
+
+        if (!alreadyExists) {
+          try {
+            const res = await createSchedule({
+              driver: dId,
+              unit: uId,
+              shiftDate: selectedDate,
+              shiftType: s.shiftType,
+              shiftStart: shiftTimes.start,
+              shiftEnd: shiftTimes.end,
+              route: s.route || routeKey,
+            });
+            pushUndoAction({
+              type: "CREATE",
+              scheduleId: (res.schedule || res)._id,
+            });
+            copiedCount++;
+          } catch {}
+        }
+      }
+
+      toast.success(
+        `Copied ${copiedCount} assignments from same day last week (${formatDateFriendly(lastWeekStr)})!`,
+        { icon: "✨" }
+      );
+      await fetchSchedules(true);
+    } catch (err) {
+      console.error("Failed to copy from last week:", err);
+      toast.error("Failed to copy assignments.");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
+
+  // Bulk: Clear Day for Route
+  const handleClearDay = async (routeKey) => {
+    setIsActionSubmitting(true);
+    const routeUnits = units.filter(
+      (u) => getRouteForUnit(u.bodyNumber, u.route) === routeKey
+    );
+    const unitIds = new Set(routeUnits.map((u) => u._id));
+
+    const daySchedules = schedules.filter((s) => {
+      const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0, 10) : "";
+      const sUnitId = s.unit?._id || s.unit;
+      return sDate === selectedDate && unitIds.has(sUnitId);
+    });
+
+    try {
+      for (const s of daySchedules) {
+        await deleteSchedule(s._id);
+        pushUndoAction({
+          type: "DELETE",
+          prevSchedule: s,
+        });
+      }
+
+      toast.success(`Cleared ${daySchedules.length} assignments.`, {
+        icon: "🗑️",
+      });
+      await fetchSchedules(true);
+    } catch (err) {
+      console.error("Failed to clear day:", err);
+      toast.error("Failed to clear assignments.");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
+
+  // Bulk: Save Template
+  const handleSaveTemplate = (name) => {
+    const routeUnits = selectedRouteKey
+      ? units.filter((u) => getRouteForUnit(u.bodyNumber, u.route) === selectedRouteKey)
+      : units;
+    const unitIds = new Set(routeUnits.map((u) => u._id));
+
+    const targetSchedules = schedules.filter((s) => {
+      const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0, 10) : "";
+      const sUnitId = s.unit?._id || s.unit;
+      return sDate === selectedDate && unitIds.has(sUnitId) && (s.driver?._id || s.driver);
+    });
+
+    const newTemplate = {
+      id: `tpl-${Date.now()}`,
+      name,
+      routeKey: selectedRouteKey || "ALL",
+      createdAt: new Date().toISOString(),
+      assignments: targetSchedules.map((s) => ({
+        unitId: s.unit?._id || s.unit,
+        driverId: s.driver?._id || s.driver,
+        shiftType: s.shiftType,
+        route: s.route || selectedRouteKey,
+      })),
+    };
+
+    const updated = [newTemplate, ...savedTemplates];
+    setSavedTemplates(updated);
+    try {
+      localStorage.setItem("CTMS_SCHEDULE_TEMPLATES", JSON.stringify(updated));
+    } catch {}
+
+    toast.success(`Template "${name}" saved!`, { icon: "🔖" });
+  };
+
+  // Bulk: Apply Template
+  const handleApplyTemplate = async (templateId) => {
+    const tpl = savedTemplates.find((t) => t.id === templateId);
+    if (!tpl || !tpl.assignments) return;
+
+    setIsActionSubmitting(true);
+    let appliedCount = 0;
+
+    try {
+      for (const item of tpl.assignments) {
+        const shiftTimes = SHIFT_TIMES[item.shiftType] || SHIFT_TIMES["First Shift"];
+        try {
+          const res = await createSchedule({
+            driver: item.driverId,
+            unit: item.unitId,
+            shiftDate: selectedDate,
+            shiftType: item.shiftType,
+            shiftStart: shiftTimes.start,
+            shiftEnd: shiftTimes.end,
+            route: item.route || selectedRouteKey,
+          });
+          pushUndoAction({
+            type: "CREATE",
+            scheduleId: (res.schedule || res)._id,
+          });
+          appliedCount++;
+        } catch {}
+      }
+
+      toast.success(`Applied template (${appliedCount} shifts created)`, { icon: "🎉" });
+      await fetchSchedules(true);
+    } catch (err) {
+      console.error("Failed to apply template:", err);
+      toast.error("Failed to apply template.");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
+
+  // Open Add Unit Modal
+  const handleOpenAddUnitModal = (targetRoute) => {
+    setAddUnitTargetRoute(targetRoute || selectedRouteKey || allRoutes[0] || "LANGGAM");
+    setIsAddUnitModalOpen(true);
+  };
+
+  // Add Units to Route (Updates unit's assigned route)
+  const handleAddUnitsToRoute = async (routeKey, unitsToAdd) => {
+    const targetConfig = getRouteConfig(routeKey, customRoutes);
+    setIsActionSubmitting(true);
+    try {
+      // Optimistically update units in state
+      setUnits((prev) =>
+        prev.map((u) => {
+          const matching = unitsToAdd.find((add) => add._id === u._id);
+          return matching ? { ...u, route: routeKey } : u;
+        })
+      );
+
+      // Sync each unit to backend
+      await Promise.allSettled(
+        unitsToAdd.map((u) =>
+          api.put(`/units/${u._id}`, { route: routeKey })
+        )
       );
 
       toast.success(
-        "✔ Assignment removed successfully."
+        `${unitsToAdd.length} ${unitsToAdd.length === 1 ? "unit" : "units"} added to ${targetConfig.name} route`,
+        { icon: "🚐" }
       );
-
-      setConfirmDelete({
-        isOpen: false,
-        scheduleId: null,
-        unitId: null,
-        shiftType: null,
-      });
-
-      await fetchBoardData();
+      setIsAddUnitModalOpen(false);
     } catch (err) {
-      console.error(err);
-
-      toast.error(
-        err?.response?.data?.message ||
-          err.message ||
-          "Failed to remove assignment"
-      );
+      console.error("Failed to add units to route:", err);
+      toast.error("Failed to update unit route assignment.");
+    } finally {
+      setIsActionSubmitting(false);
     }
   };
 
-  // Trigger Details Modal for Saved Schedule
-  const handleTriggerDetails = useCallback(
-    (unit, dbState) => {
-      setDetailsModal({
-        isOpen: true,
-        unit,
-        dbState,
-      });
-    },
-    []
-  );
+  // Create New Route
+  const handleCreateNewRoute = ({ name, hex, colorName, description }) => {
+    const key = name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+    const updated = {
+      ...customRoutes,
+      [key]: { name, hex, colorName, description },
+    };
+    setCustomRoutes(updated);
+    try {
+      localStorage.setItem("CTMS_CUSTOM_ROUTES", JSON.stringify(updated));
+    } catch {}
 
-  // Group units dynamically by route
-  const groupedUnits = ROUTES.reduce(
-    (acc, route) => {
-      acc[route] = units.filter(
-        (u) =>
-          getRouteForUnit(u.bodyNumber) ===
-          route
+    toast.success(`Route "${name}" created!`, { icon: "🛣️" });
+    setIsAddNewRouteModalOpen(false);
+  };
+
+  // Remove Unit from Route (unassigns route, unit remains in system)
+  const handleRemoveUnitFromRoute = async (unitId, routeKey) => {
+    const targetConfig = getRouteConfig(routeKey, customRoutes);
+    setUnits((prev) =>
+      prev.map((u) => (u._id === unitId ? { ...u, route: "UNASSIGNED" } : u))
+    );
+    try {
+      await api.put(`/units/${unitId}`, { route: "UNASSIGNED" });
+      toast.success(`Unit removed from ${targetConfig.name}`, { icon: "ℹ️" });
+    } catch (err) {
+      console.error("Failed to remove unit from route:", err);
+      toast.error("Failed to update unit route.");
+    }
+  };
+
+  // Bulk: Remove Units from Route
+  const handleBulkRemoveUnitsFromRoute = async (unitIds, routeKey) => {
+    const targetConfig = getRouteConfig(routeKey, customRoutes);
+    const idSet = new Set(unitIds);
+    setUnits((prev) =>
+      prev.map((u) => (idSet.has(u._id) ? { ...u, route: "UNASSIGNED" } : u))
+    );
+    try {
+      await Promise.allSettled(
+        unitIds.map((id) => api.put(`/units/${id}`, { route: "UNASSIGNED" }))
       );
+      toast.success(
+        `${unitIds.length} units removed from ${targetConfig.name}`,
+        { icon: "ℹ️" }
+      );
+    } catch (err) {
+      console.error("Bulk remove failed:", err);
+      toast.error("Failed to remove units.");
+    }
+  };
 
-      return acc;
-    },
-    {}
-  );
+  // Bulk: Clear Assignments for Specific Units on a Date
+  const handleBulkClearAssignments = async (unitIds, dateStr) => {
+    const idSet = new Set(unitIds);
+    const targetSchedules = schedules.filter((s) => {
+      const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0, 10) : "";
+      const sUnitId = s.unit?._id || s.unit;
+      return sDate === dateStr && idSet.has(sUnitId);
+    });
 
-  const isBoardLoading =
-    initialLoading || loading;
+    if (targetSchedules.length === 0) {
+      toast("No active assignments to clear for selected units.", { icon: "ℹ️" });
+      return;
+    }
+
+    setIsActionSubmitting(true);
+    try {
+      for (const s of targetSchedules) {
+        await deleteSchedule(s._id);
+        pushUndoAction({
+          type: "DELETE",
+          prevSchedule: s,
+        });
+      }
+      toast.success(`Cleared ${targetSchedules.length} assignments.`, {
+        icon: "🗑️",
+      });
+      await fetchSchedules(true);
+    } catch (err) {
+      console.error("Bulk clear failed:", err);
+      toast.error("Failed to clear assignments.");
+    } finally {
+      setIsActionSubmitting(false);
+    }
+  };
+
+  // Open Driver History Slide-Over
+  const handleOpenDriverHistory = (driver) => {
+    setHistoryDriver(driver);
+    setIsDriverHistoryOpen(true);
+  };
+
+  // Close modals on Escape key
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if (e.key === "Escape") {
+        if (isAssignPopoverOpen) {
+          setIsAssignPopoverOpen(false);
+        } else if (isHistoryDrawerOpen) {
+          setIsHistoryDrawerOpen(false);
+        } else if (isDriverHistoryOpen) {
+          setIsDriverHistoryOpen(false);
+        } else if (isAddUnitModalOpen) {
+          setIsAddUnitModalOpen(false);
+        } else if (isAddNewRouteModalOpen) {
+          setIsAddNewRouteModalOpen(false);
+        } else if (selectedRouteKey) {
+          setSelectedRouteKey(null);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [
+    isAssignPopoverOpen,
+    isHistoryDrawerOpen,
+    isDriverHistoryOpen,
+    isAddUnitModalOpen,
+    isAddNewRouteModalOpen,
+    selectedRouteKey,
+  ]);
+
+  // Unassigned slots count across today's schedule
+  const unassignedSlotsCount = useMemo(() => {
+    let unassigned = 0;
+    units.forEach((u) => {
+      const isMaint =
+        u.status === "Under Maintenance" ||
+        u.status === "Maintenance" ||
+        u.maintenanceStatus === "Maintenance";
+      if (isMaint) return;
+
+      const first = displaySchedules.find((s) => {
+        const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0, 10) : "";
+        const sUnitId = s.unit?._id || s.unit;
+        return sDate === selectedDate && sUnitId === u._id && s.shiftType === "First Shift";
+      });
+
+      const second = displaySchedules.find((s) => {
+        const sDate = s.shiftDate ? new Date(s.shiftDate).toISOString().slice(0, 10) : "";
+        const sUnitId = s.unit?._id || s.unit;
+        return sDate === selectedDate && sUnitId === u._id && s.shiftType === "Second Shift";
+      });
+
+      if (!first || (!first.driver?._id && !first.driver)) unassigned++;
+      if (!second || (!second.driver?._id && !second.driver)) unassigned++;
+    });
+    return unassigned;
+  }, [units, displaySchedules, selectedDate]);
+
+  // Jump to Today
+  const handleJumpToToday = () => {
+    setSelectedDate(new Date().toISOString().slice(0, 10));
+  };
+
+  const isToday = selectedDate === new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="space-y-7">
-      {/* Header Controls */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold text-black tracking-tight">
-              Daily Dispatch Scheduling Board
-            </h1>
+    <div className="space-y-5 animate-in fade-in duration-150">
+      {/* Page Header (Above toolbar, matching other pages) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">
+            <span>SPTC</span>
+            <span className="opacity-50">/</span>
+            <span>Fleet Operations</span>
+            <span className="opacity-50">/</span>
+            <span className="font-semibold text-slate-700 dark:text-slate-200">Scheduling</span>
           </div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+            Scheduling
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Route-focused progressive disclosure dispatch system
+          </p>
+        </div>
+      </div>
 
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-bold text-black uppercase tracking-wider whitespace-nowrap">
-                Select Date:
-              </label>
+      {/* Toolbar Bar */}
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700/80 p-3.5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        {/* Left: Date Picker & Quick Today Button */}
+        <div className="flex items-center gap-1.5">
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSelectedDate(val);
+              setCurrentWeekStartDate(getMondayOfWeek(val));
+            }}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-750 text-slate-700 dark:text-slate-200 cursor-pointer focus:ring-2 focus:ring-blue-500"
+          />
 
-              <div className="relative flex items-center">
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) =>
-                    setSelectedDate(
-                      e.target.value
-                    )
-                  }
-                  className="border border-slate-300 rounded-lg pl-3 pr-10 py-2 text-sm bg-white text-black shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-150 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:top-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-10 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:z-20"
-                />
+          {!isToday && (
+            <button
+              type="button"
+              onClick={handleJumpToToday}
+              className="px-2.5 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 rounded-xl border border-blue-200 dark:border-blue-900/40 transition"
+            >
+              Today
+            </button>
+          )}
 
-                <Calendar
-                  size={16}
-                  className="absolute right-3 text-black pointer-events-none z-10"
-                />
-              </div>
+          {/* Syncing Indicator */}
+          {isSyncing && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 animate-pulse">
+              <RotateCcw className="w-3 h-3 animate-spin" />
+              <span className="hidden md:inline">Syncing</span>
             </div>
+          )}
+        </div>
+
+        {/* Right: Filters, View Toggle, Bell Alert, Undo & Add Unit Action */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Route Filter Dropdown */}
+          <select
+            value={routeFilter}
+            onChange={(e) => {
+              const val = e.target.value;
+              setRouteFilter(val);
+              if (val !== "ALL") {
+                setSelectedRouteKey(val);
+              } else {
+                setSelectedRouteKey(null);
+              }
+            }}
+            className="text-xs sm:text-sm font-medium px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-750 text-slate-700 dark:text-slate-200 cursor-pointer focus:ring-2 focus:ring-blue-500 shadow-2xs"
+          >
+            <option value="ALL">All Routes</option>
+            {allRoutes.map((rk) => (
+              <option key={rk} value={rk}>
+                {getRouteConfig(rk, customRoutes).name}
+              </option>
+            ))}
+          </select>
+
+          {/* Shift Filter Dropdown */}
+          <select
+            value={shiftFilter}
+            onChange={(e) => setShiftFilter(e.target.value)}
+            className="text-xs sm:text-sm font-medium px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-750 text-slate-700 dark:text-slate-200 cursor-pointer focus:ring-2 focus:ring-blue-500 shadow-2xs"
+          >
+            <option value="ALL">All Shifts</option>
+            <option value="First Shift">First Shift</option>
+            <option value="Second Shift">Second Shift</option>
+          </select>
+
+          {/* View Toggle [Routes] [Week Summary] (Positioned after shifts) */}
+          <div className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-750 p-1 gap-1 shadow-2xs">
+            <button
+              type="button"
+              title="Routes Overview"
+              aria-label="Routes Overview"
+              onClick={() => {
+                setActiveTab("ROUTES");
+              }}
+              className={`p-2 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                activeTab === "ROUTES"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+            </button>
 
             <button
-              onClick={() =>
-                setIsCreateModalOpen(
-                  true
-                )
-              }
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-150 active:scale-95 hover:shadow-md"
+              type="button"
+              title="Week Summary"
+              aria-label="Week Summary"
+              onClick={() => {
+                setActiveTab("WEEK_SUMMARY");
+              }}
+              className={`p-2 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                activeTab === "WEEK_SUMMARY"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+              }`}
             >
-              + Create Schedule
+              <Calendar className="w-4 h-4" />
             </button>
           </div>
+
+          {/* Unassigned Slots Alert Bell Icon */}
+          {unassignedSlotsCount > 0 && (
+            <div
+              title={`${unassignedSlotsCount} unassigned slots need driver assignment today`}
+              className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 flex items-center justify-center transition shadow-2xs"
+            >
+              <Bell className="w-4 h-4 text-amber-500" />
+            </div>
+          )}
+
+          {/* Undo Button */}
+          {undoStack.length > 0 && (
+            <button
+              type="button"
+              onClick={handleUndo}
+              className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition"
+              title="Undo last action"
+            >
+              <Undo2 className="w-3.5 h-3.5 text-blue-600" />
+              <span>Undo ({undoStack.length})</span>
+            </button>
+          )}
+
+          {/* Commit Pending Changes Button */}
+          {Object.keys(pendingChanges).length > 0 && (
+            <button
+              type="button"
+              onClick={handleCommitChanges}
+              disabled={isActionSubmitting}
+              className="px-4 py-2 text-xs sm:text-sm font-semibold tracking-tight text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 rounded-xl transition-all duration-150 flex items-center gap-1.5 shadow-sm hover:shadow cursor-pointer whitespace-nowrap active:scale-[0.98]"
+              title="Save all draft assignments and notify drivers"
+            >
+              {isActionSubmitting ? (
+                <RotateCcw className="w-4 h-4 text-white animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-white" strokeWidth={2.5} />
+              )}
+              <span>Save Changes</span>
+            </button>
+          )}
+
+          {/* Add Unit to Route Button */}
+          <button
+            type="button"
+            onClick={() => handleOpenAddUnitModal(selectedRouteKey || allRoutes[0])}
+            className="px-4 py-2 text-xs sm:text-sm font-semibold tracking-tight text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl transition-all duration-150 flex items-center gap-1.5 shadow-sm hover:shadow cursor-pointer whitespace-nowrap active:scale-[0.98]"
+            title="Add vehicles to route"
+          >
+            <Plus className="w-4 h-4 text-white" strokeWidth={2.5} />
+            <span>Add Unit</span>
+          </button>
         </div>
       </div>
 
-      {error && (
-        <div className="bg-rose-50 border border-rose-200 text-black rounded-lg p-4 text-sm font-semibold shadow-sm">
-          {error}
-        </div>
-      )}
-
-      {isBoardLoading ? (
-        <div className="flex justify-center items-center py-12">
-          <div className="animate-pulse space-y-4 w-full">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
-              {[...Array(5)].map((_, i) => (
-                <div
-                  key={i}
-                  className="h-72 bg-slate-200/40 rounded-xl border border-slate-200"
-                ></div>
-              ))}
-            </div>
-          </div>
+      {/* Main Progressive Disclosure View Canvas */}
+      {initialLoading ? (
+        <div className="py-24 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
+          <span className="w-7 h-7 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-medium">Loading schedule board...</p>
         </div>
       ) : (
-        /* Dispatch Board Columns */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
-          {ROUTES.map((route) => {
-            const routeUnits =
-              groupedUnits[route] || [];
+        <>
+          {/* View Tab 1: ROUTES (Level 1 or Level 2) */}
+          {activeTab === "ROUTES" && (
+            <>
+              {!selectedRouteKey ? (
+                /* Level 1: Routes Overview */
+                <RoutesOverviewView
+                  routes={allRoutes}
+                  customRoutes={customRoutes}
+                  units={units}
+                  schedules={displaySchedules}
+                  selectedDate={selectedDate}
+                  shiftFilter={shiftFilter}
+                  routeFilter={routeFilter}
+                  onSelectRoute={(routeKey) => setSelectedRouteKey(routeKey)}
+                  onAddUnitToRoute={handleOpenAddUnitModal}
+                  onOpenAddNewRoute={() => setIsAddNewRouteModalOpen(true)}
+                />
+              ) : (
+                /* Level 2: Route Detail */
+                <RouteDetailView
+                  routeKey={selectedRouteKey}
+                  selectedDate={selectedDate}
+                  onChangeDate={setSelectedDate}
+                  units={units}
+                  schedules={displaySchedules}
+                  drivers={drivers}
+                  customRoutes={customRoutes}
+                  shiftFilter={shiftFilter}
+                  onBack={() => setSelectedRouteKey(null)}
+                  onAssignSlot={(slotData) => {
+                    setAssignPopoverData(slotData);
+                    setIsAssignPopoverOpen(true);
+                  }}
+                  onDeleteSchedule={handleStageRemoveAssignment}
+                  onOpenHistory={(unit) => {
+                    setHistoryDrawerUnit(unit);
+                    setIsHistoryDrawerOpen(true);
+                  }}
+                  onOpenDriverHistory={handleOpenDriverHistory}
+                  onSwapOrAssign={handleSwapOrAssign}
+                  onAddUnitToRoute={handleOpenAddUnitModal}
+                  onRemoveUnitFromRoute={handleRemoveUnitFromRoute}
+                  onBulkRemoveUnitsFromRoute={handleBulkRemoveUnitsFromRoute}
+                  onBulkClearAssignments={handleBulkClearAssignments}
+                  onCopyFromYesterday={handleCopyFromYesterday}
+                  onCopyFromLastWeek={handleCopyFromLastWeek}
+                  onClearDay={handleClearDay}
+                  onSaveTemplate={(name) => handleSaveTemplate(name)}
+                  onApplyTemplate={handleApplyTemplate}
+                  savedTemplates={savedTemplates}
+                />
+              )}
+            </>
+          )}
 
-            return (
-              <div
-                key={route}
-                className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col min-h-[520px]"
-              >
-                {/* Column Header */}
-                <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                  <span className="text-sm font-bold text-black tracking-wider">
-                    {route}
-                  </span>
-
-                  <span className="text-xs bg-slate-200 text-black font-bold px-2.5 py-1 rounded-full">
-                    {routeUnits.length}
-                  </span>
-                </div>
-
-                {/* Cards Container */}
-                <div className="p-4 space-y-4 overflow-y-auto flex-1 max-h-[70vh]">
-                  {routeUnits.length === 0 ? (
-                    <div className="text-center py-10 text-sm text-black font-medium italic">
-                      No units assigned
-                    </div>
-                  ) : (
-                    routeUnits.map((unit) => {
-                      const uState =
-                        dropdownStates[
-                          unit._id
-                        ] || {
-                          firstShiftDriver:
-                            "",
-                          secondShiftDriver:
-                            "",
-                        };
-
-                      const dbState =
-                        dbStateForUnit[
-                          unit._id
-                        ] || {
-                          firstShiftDriver:
-                            "",
-                          secondShiftDriver:
-                            "",
-                          firstShiftScheduleId:
-                            null,
-                          secondShiftScheduleId:
-                            null,
-                        };
-
-                      return (
-                        <UnitCard
-                          key={unit._id}
-                          unit={unit}
-                          drivers={drivers}
-                          uState={uState}
-                          dbState={dbState}
-                          onDriverChange={
-                            handleDriverChange
-                          }
-                          onSave={
-                            handleSaveAssignment
-                          }
-                          isSaving={
-                            savingUnitId ===
-                            unit._id
-                          }
-                          isSaved={
-                            !!savedStatuses[
-                              unit._id
-                            ]
-                          }
-                          onTriggerDelete={
-                            handleTriggerDelete
-                          }
-                          onTriggerDetails={
-                            handleTriggerDetails
-                          }
-                          allAssignedDrivers={
-                            allAssignedDrivers
-                          }
-                        />
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+          {/* View Tab 2: WEEK SUMMARY (Level 4) */}
+          {activeTab === "WEEK_SUMMARY" && (
+            <WeekSummaryRouteView
+              activeRouteKey={selectedRouteKey || "LANGGAM"}
+              onChangeRoute={(rk) => setSelectedRouteKey(rk)}
+              allRoutes={allRoutes}
+              customRoutes={customRoutes}
+              currentWeekStartDate={currentWeekStartDate}
+              onChangeWeek={(newWeek) => setCurrentWeekStartDate(newWeek)}
+              units={units}
+              schedules={displaySchedules}
+              drivers={drivers}
+              onAssignSlot={(slotData) => {
+                setAssignPopoverData(slotData);
+                setIsAssignPopoverOpen(true);
+              }}
+            />
+          )}
+        </>
       )}
 
-      {/* Recent Schedules History List */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-        <h2 className="text-base font-bold text-black uppercase tracking-wider mb-5 pb-3 border-b border-slate-200">
-          Recent Schedules
-        </h2>
+      {/* Level 3: Assignment Popover Modal */}
+      <AssignmentPopover
+        isOpen={isAssignPopoverOpen}
+        onClose={() => setIsAssignPopoverOpen(false)}
+        initialData={assignPopoverData}
+        units={units}
+        drivers={drivers}
+        schedules={displaySchedules}
+        onAssign={handleStageAssignment}
+        onRemove={handleStageRemoveAssignment}
+        isSubmitting={isActionSubmitting}
+      />
 
-        {recentDates.length === 0 ? (
-          <p className="text-sm text-black italic">
-            No recent schedules found.
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-3">
-            {recentDates.map((d) => (
-              <button
-                key={d}
-                onClick={() =>
-                  setSelectedDate(d)
-                }
-                className={`px-4 py-2 border rounded-lg text-sm font-semibold transition-all duration-150 active:scale-95 ${
-                  selectedDate === d
-                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                    : "bg-slate-50 text-black border-slate-300 hover:bg-slate-100"
-                }`}
-              >
-                {formatDate(d)}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Slide-Over Unit Schedule History Drawer */}
+      <ScheduleHistoryDrawer
+        isOpen={isHistoryDrawerOpen}
+        onClose={() => {
+          setIsHistoryDrawerOpen(false);
+          setHistoryDrawerUnit(null);
+        }}
+        unit={historyDrawerUnit}
+        allSchedules={schedules}
+        drivers={drivers}
+      />
 
-      {/* Assignment Details Modal */}
-      {detailsModal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 backdrop-blur-xs p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-xl w-full max-w-lg p-6 relative animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex justify-between items-center mb-5 border-b border-slate-200 pb-4">
-              <h2 className="text-lg font-bold text-black uppercase tracking-wider">
-                Assignment Details — Unit{" "}
-                {detailsModal.unit?.bodyNumber}
-              </h2>
+      {/* Slide-Over Driver Work History Drawer */}
+      <DriverHistoryDrawer
+        isOpen={isDriverHistoryOpen}
+        onClose={() => {
+          setIsDriverHistoryOpen(false);
+          setHistoryDriver(null);
+        }}
+        driver={historyDriver}
+        allSchedules={schedules}
+        units={units}
+        customRoutes={customRoutes}
+      />
 
-              <button
-                className="text-sm text-black hover:text-blue-600 font-semibold transition-colors duration-150 focus:outline-none"
-                onClick={() =>
-                  setDetailsModal({
-                    isOpen: false,
-                    unit: null,
-                    dbState: null,
-                  })
-                }
-              >
-                Close
-              </button>
-            </div>
+      {/* Add Unit to Route Modal */}
+      <AddUnitToRouteModal
+        isOpen={isAddUnitModalOpen}
+        onClose={() => setIsAddUnitModalOpen(false)}
+        initialRouteKey={addUnitTargetRoute}
+        allRoutes={allRoutes}
+        customRoutes={customRoutes}
+        units={units}
+        onAddUnits={handleAddUnitsToRoute}
+        isSubmitting={isActionSubmitting}
+      />
 
-            {detailsLoading ? (
-              <div className="flex justify-center items-center py-12">
-                <span className="loading loading-spinner loading-md text-blue-600"></span>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Unit & Route Info */}
-                <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
-                  <div>
-                    <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                      Unit Number
-                    </span>
+      {/* Add New Route Modal */}
+      <AddNewRouteModal
+        isOpen={isAddNewRouteModalOpen}
+        onClose={() => setIsAddNewRouteModalOpen(false)}
+        onCreateRoute={handleCreateNewRoute}
+      />
 
-                    <span className="text-sm font-semibold text-black">
-                      {detailsModal.unit?.bodyNumber}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                      Route
-                    </span>
-
-                    <span className="text-sm font-semibold text-black">
-                      {getRouteForUnit(
-                        detailsModal.unit?.bodyNumber
-                      ) ||
-                        detailsModal.unit?.route ||
-                        "Unassigned"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* First Shift Detail */}
-                <div className="space-y-3 border-t border-slate-200 pt-4">
-                  <h3 className="text-sm font-bold text-black uppercase tracking-wide">
-                    First Shift (05:00 - 13:00)
-                  </h3>
-
-                  {firstShiftDetail ? (
-                    <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50 p-4 rounded-lg border border-slate-200">
-                      <div className="col-span-2">
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Assigned Driver
-                        </span>
-
-                        <span className="font-semibold text-black">
-                          {firstShiftDetail.driver
-                            ? `${firstShiftDetail.driver.firstName} ${firstShiftDetail.driver.lastName}`
-                            : "Unknown"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Assigned By
-                        </span>
-
-                        <span className="font-medium text-black">
-                          {firstShiftDetail.assignedBy
-                            ? firstShiftDetail.assignedBy.firstName
-                              ? `${firstShiftDetail.assignedBy.firstName} ${firstShiftDetail.assignedBy.lastName}`
-                              : firstShiftDetail.assignedBy.username ||
-                                firstShiftDetail.assignedBy.email
-                            : "System"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Remarks
-                        </span>
-
-                        <span className="font-medium text-black">
-                          {firstShiftDetail.remarks ||
-                            "No remarks"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Created At
-                        </span>
-
-                        <span className="font-medium text-black">
-                          {formatTimestamp(
-                            firstShiftDetail.createdAt
-                          )}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Updated At
-                        </span>
-
-                        <span className="font-medium text-black">
-                          {formatTimestamp(
-                            firstShiftDetail.updatedAt
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-black italic">
-                      No assignment saved for First Shift on this date.
-                    </p>
-                  )}
-                </div>
-
-                {/* Second Shift Detail */}
-                <div className="space-y-3 border-t border-slate-200 pt-4">
-                  <h3 className="text-sm font-bold text-black uppercase tracking-wide">
-                    Second Shift (13:00 - 21:00)
-                  </h3>
-
-                  {secondShiftDetail ? (
-                    <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50 p-4 rounded-lg border border-slate-200">
-                      <div className="col-span-2">
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Assigned Driver
-                        </span>
-
-                        <span className="font-semibold text-black">
-                          {secondShiftDetail.driver
-                            ? `${secondShiftDetail.driver.firstName} ${secondShiftDetail.driver.lastName}`
-                            : "Unknown"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Assigned By
-                        </span>
-
-                        <span className="font-medium text-black">
-                          {secondShiftDetail.assignedBy
-                            ? secondShiftDetail.assignedBy.firstName
-                              ? `${secondShiftDetail.assignedBy.firstName} ${secondShiftDetail.assignedBy.lastName}`
-                              : secondShiftDetail.assignedBy.username ||
-                                secondShiftDetail.assignedBy.email
-                            : "System"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Remarks
-                        </span>
-
-                        <span className="font-medium text-black">
-                          {secondShiftDetail.remarks ||
-                            "No remarks"}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Created At
-                        </span>
-
-                        <span className="font-medium text-black">
-                          {formatTimestamp(
-                            secondShiftDetail.createdAt
-                          )}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="block text-xs font-bold text-black uppercase tracking-wider">
-                          Updated At
-                        </span>
-
-                        <span className="font-medium text-black">
-                          {formatTimestamp(
-                            secondShiftDetail.updatedAt
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-black italic">
-                      No assignment saved for Second Shift on this date.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-6 flex justify-end border-t border-slate-200 pt-4">
-              <button
-                type="button"
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-black text-sm font-semibold rounded-lg border border-slate-300 transition-all duration-150 active:scale-95"
-                onClick={() =>
-                  setDetailsModal({
-                    isOpen: false,
-                    unit: null,
-                    dbState: null,
-                  })
-                }
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {confirmDelete.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 backdrop-blur-xs p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4 animate-in fade-in zoom-in-95 duration-150">
-            <h3 className="text-lg font-bold text-black uppercase tracking-wider mb-2">
-              Remove Assignment
-            </h3>
-
-            <p className="text-sm text-black mb-6">
-              Remove this assignment?
-            </p>
-
-            <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-              <button
-                onClick={() =>
-                  setConfirmDelete({
-                    isOpen: false,
-                    scheduleId: null,
-                    unitId: null,
-                    shiftType: null,
-                  })
-                }
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-black text-sm font-semibold rounded-lg border border-slate-300 transition-all duration-150 active:scale-95"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleConfirmDelete}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold rounded-lg transition-all duration-150 active:scale-95"
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Existing Create Schedule Modal */}
-      <CreateScheduleModal
-        isOpen={isCreateModalOpen}
-        onClose={() =>
-          setIsCreateModalOpen(false)
-        }
+      {/* Command Palette (Ctrl+K or /) */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onAction={(actionKey, payload) => {
+          if (actionKey === "SET_VIEW") {
+            setActiveTab("ROUTES");
+            if (payload !== "BOARD") {
+              setSelectedRouteKey(payload);
+            } else {
+              setSelectedRouteKey(null);
+            }
+          } else if (actionKey === "JUMP_TODAY") {
+            handleJumpToToday();
+          } else if (actionKey === "SET_ROUTE_FILTER") {
+            setRouteFilter(payload);
+            if (payload !== "ALL") setSelectedRouteKey(payload);
+          } else if (actionKey === "VIEW_UNIT_HISTORY") {
+            setHistoryDrawerUnit(payload);
+            setIsHistoryDrawerOpen(true);
+          }
+        }}
         drivers={drivers}
         units={units}
-        onSuccess={() => {
-          toast.success(
-            "Schedule created successfully"
-          );
-
-          setIsCreateModalOpen(false);
-          fetchBoardData();
-        }}
       />
     </div>
   );
 };
 
 export default SchedulingBoard;
+

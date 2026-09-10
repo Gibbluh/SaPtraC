@@ -8,6 +8,19 @@ const {
   extractEntityId,
 } = require("../utils/qrPayload");
 
+async function getNextDriverCode() {
+  const latest = await Driver.findOne({ driverCode: /^DRV-\d+$/ })
+    .sort({ driverCode: -1 })
+    .select({ driverCode: 1 })
+    .lean();
+
+  const nextNumber = latest?.driverCode
+    ? Number(latest.driverCode.replace("DRV-", "")) + 1
+    : (await Driver.countDocuments({})) + 1;
+
+  return `DRV-${String(nextNumber).padStart(4, "0")}`;
+}
+
 // Create Driver Service
 async function createDriverService(data) {
   const { email, licenseNumber, firstName, lastName, middleName, profileImage, documents } = data;
@@ -21,13 +34,23 @@ async function createDriverService(data) {
   if (licenseExists) {
     throw { status: 409, message: 'License number already exists.' };
   }
+  if (data.driverCode) {
+    const codeExists = await Driver.findOne({
+      driverCode: String(data.driverCode).toUpperCase(),
+      deletedAt: null,
+    });
+    if (codeExists) {
+      throw { status: 409, message: 'Driver code already exists.' };
+    }
+  }
   const driver = new Driver(data);
+  driver.driverCode = data.driverCode || await getNextDriverCode();
   // If file uploads present, set fields
   if (profileImage) driver.profileImage = profileImage;
   if (documents && Array.isArray(documents) && documents.length > 0) driver.documents = documents;
 
   driver.qrCode = await generateQRCode(
-    buildEntityQRPayload("driver", driver._id)
+    buildEntityQRPayload("driver", driver.driverCode)
   );
 
   try {
@@ -41,6 +64,9 @@ async function createDriverService(data) {
       }
       if (duplicateField === "licenseNumber") {
         throw { status: 409, message: "License number already exists." };
+      }
+      if (duplicateField === "driverCode") {
+        throw { status: 409, message: "Driver code already exists." };
       }
       throw { status: 409, message: "Duplicate driver record." };
     }
@@ -69,7 +95,10 @@ async function getDriverByQRService(code) {
     };
   }
 
-  const driver = await Driver.findOne({ _id: id, deletedAt: null });
+  const driver = await Driver.findOne({
+    $or: [{ _id: mongoose.Types.ObjectId.isValid(id) ? id : null }, { driverCode: String(id).toUpperCase() }],
+    deletedAt: null,
+  });
 
   if (!driver) {
     throw {
@@ -124,16 +153,11 @@ async function getDriversService({ page = 1, limit = 1000, search = '', status }
 
 // Get Single Driver Service
 async function getSingleDriverService(id) {
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    throw {
-      status: 400,
-      message: "Invalid driver ID.",
-    };
-  }
-
   // Driver Information
   const driver = await Driver.findOne({
-    _id: id,
+    ...(mongoose.Types.ObjectId.isValid(id)
+      ? { _id: id }
+      : { driverCode: String(id).toUpperCase() }),
     deletedAt: null,
   }).lean();
 
@@ -148,7 +172,7 @@ async function getSingleDriverService(id) {
   const summary = await Remittance.aggregate([
     {
       $match: {
-        driver: new mongoose.Types.ObjectId(id),
+        driver: driver._id,
         verificationStatus: "Verified",
         deletedAt: null,
       },

@@ -7,6 +7,7 @@ const driverSchema = new mongoose.Schema(
     firstName: { type: String, required: true, trim: true },
     lastName: { type: String, required: true, trim: true },
     middleName: { type: String, trim: true },
+    driverCode: { type: String, unique: true, sparse: true, index: true, trim: true, uppercase: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
     phone: { type: String, required: true, trim: true },
     address: { type: String, trim: true },

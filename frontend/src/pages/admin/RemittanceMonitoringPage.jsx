@@ -4,6 +4,7 @@ import { useRemittanceApi } from "../../lib/remittanceApi";
 import { AlertCircle, CheckCircle, RefreshCw, Search } from "lucide-react";
 import { useDriverApi } from "../../lib/driverApi";
 import { useUnitApi } from "../../lib/unitApi";
+import toast from 'react-hot-toast';
 
 const PAGE_SIZE = 10;
 
@@ -22,6 +23,7 @@ const RemittanceTable = ({
   page,
   totalPages,
   onPageChange,
+  highlightId,
 }) => (
   <div className="overflow-x-auto bg-white border border-slate-200/60 rounded-xl shadow-sm mt-4">
     <table className="min-w-full table-auto border-collapse text-left">
@@ -112,7 +114,8 @@ const RemittanceTable = ({
           remittances.map((r, idx) => (
             <tr
               key={r._id}
-              className="border-b border-slate-100 hover:bg-slate-50/55 transition-colors duration-150 odd:bg-white even:bg-slate-50/20"
+              className={`border-b transition-all duration-500 ${highlightId === r._id ? 'bg-blue-100 ring-2 ring-inset ring-blue-500 shadow-md animate-pulse' : 'border-slate-100 hover:bg-slate-50/55 odd:bg-white even:bg-slate-50/20'}`}
+              id={`remittance-row-${r._id}`}
             >
               <td className="px-5 py-3.5 text-sm text-black">
                 {(page - 1) * PAGE_SIZE + idx + 1}
@@ -414,6 +417,8 @@ const RemittanceFormModal = ({
 const RemittanceMonitoringPage = () => {
   const location = useLocation();
   const fuelTransaction = location.state?.fuelTransaction;
+  const highlightId = location.state?.highlightId;
+  // effectiveHighlightId will be computed below
 
   const { getDriversDropdown } = useDriverApi();
   const { getUnits } = useUnitApi();
@@ -428,6 +433,7 @@ const RemittanceMonitoringPage = () => {
   } = useRemittanceApi();
 
   const [remittances, setRemittances] = useState([]);
+  const effectiveHighlightId = (highlightId && String(highlightId).startsWith('m') && remittances?.length > 0) ? remittances[0]._id : highlightId;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -439,6 +445,22 @@ const RemittanceMonitoringPage = () => {
     negative: "",
   });
   const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (effectiveHighlightId && !loading && remittances.length > 0) {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        const el = document.getElementById(`remittance-row-${effectiveHighlightId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          clearInterval(interval);
+        }
+        attempts++;
+        if (attempts > 20) clearInterval(interval); // give up after 2 seconds
+      }, 100);
+      return () => clearInterval(interval);
+    }
+  }, [effectiveHighlightId, loading, remittances.length]);
 
   useEffect(() => {
     if (fuelTransaction) {
@@ -581,9 +603,10 @@ const RemittanceMonitoringPage = () => {
 
     try {
       await verifyRemittance(id);
+      toast.success("Remittance verified successfully");
       fetchRemittances();
     } catch {
-      alert("Verification failed.");
+      toast.error("Verification failed.");
     }
   };
 
@@ -599,7 +622,7 @@ const RemittanceMonitoringPage = () => {
       setShowForm(false);
       fetchRemittances();
     } catch {
-      alert("Failed to create remittance.");
+      toast.error("Failed to create remittance.");
     } finally {
       setCreating(false);
     }
@@ -607,17 +630,6 @@ const RemittanceMonitoringPage = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-8 text-black">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-bold text-black tracking-tight">
-            Remittance Monitoring
-          </h1>
-
-          <p className="text-sm font-medium text-black mt-1">
-            Track cooperative daily remittance records, driver payments, and verification status.
-          </p>
-        </div>
-      </div>
 
       {/* Search & Filter */}
       <div className="bg-white border border-slate-200/60 rounded-xl p-4 mb-6 shadow-sm flex flex-wrap gap-3 items-center">

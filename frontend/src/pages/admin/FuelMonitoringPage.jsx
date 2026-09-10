@@ -1003,21 +1003,6 @@ const handleReceiptOCRExtract = ({
           HEADER
       ====================================================== */}
 
-      <div className="mb-6">
-        <div className="flex items-start gap-3">
-          <div>
-              <h1 className="text-3xl md:text-4xl font-bold text-black tracking-tight">
-              Fuel Monitoring
-            </h1>
-
-            <p className="mt-1 text-sm font-medium text-black md:text-base">
-              Track fuel logs, consumption transactions, and detect fuel anomalies.
-            </p>
-          </div>
-
-        </div>
-      </div>
-
       {/* =====================================================
           CONTROLS
       ====================================================== */}

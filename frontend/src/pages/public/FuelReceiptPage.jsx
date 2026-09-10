@@ -8,17 +8,15 @@ const FuelReceiptPage = () => {
 
   const [fuel, setFuel] = useState(null);
 
+  const loadFuel = async () => {
+    const res = await getPublicFuelTransaction(id);
+    console.log("API RESPONSE:", res);
+    setFuel(res);
+  };
+
   useEffect(() => {
     loadFuel();
-  }, []);
-
-const loadFuel = async () => {
-  const res = await getPublicFuelTransaction(id);
-
-  console.log("API RESPONSE:", res);
-
-  setFuel(res);
-};
+  }, [id, getPublicFuelTransaction]);
 
   if (!fuel) return <div>Loading...</div>;
 

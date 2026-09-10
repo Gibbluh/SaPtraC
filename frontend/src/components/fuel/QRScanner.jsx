@@ -124,13 +124,19 @@ const QRScanner = ({ type, onScanSuccess, onClose }) => {
 
         {error && (
           <div className="text-red-600 text-sm mt-3">
-            {error}
+            {typeof error === "object" ? (error?.message || "Scan error") : String(error)}
           </div>
         )}
 
         {info && (
           <pre className="bg-gray-100 p-2 mt-3 rounded text-xs overflow-auto">
-            {JSON.stringify(info,null,2)}
+            {(() => {
+              try {
+                return JSON.stringify(info, null, 2);
+              } catch {
+                return String(info?.name || info?._id || "Scanned Entity");
+              }
+            })()}
           </pre>
         )}
 
